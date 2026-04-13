@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.7] — 2026-04-12
+
+### Added
+- **EC2 CreateDefaultVpc** — new action creates a default VPC with all associated resources (3 default subnets, internet gateway, route table, network ACL, security group), matching real AWS behavior. Returns `DefaultVpcAlreadyExists` if one already exists. Reported by @staranto 
+- **DynamoDB ExecuteStatement (PartiQL)** — supports `SELECT`, `INSERT`, `UPDATE`, `DELETE` PartiQL statements with `?` parameter binding. Enables IntelliJ database integration and other PartiQL-based tooling. Reported by @mspiller
+- **SNS FIFO topic support** — `.fifo` naming validation, `MessageGroupId`/`MessageDeduplicationId` enforcement, 5-minute deduplication window, sequence numbers, content-based deduplication, FIFO SQS subscription validation, `PublishBatch` FIFO support, thread-safe dedup cache. Contributed by @yskarparis (#279)
+
+### Fixed
+- **Lambda UpdateFunctionConfiguration Layers** — attaching layers via `update-function-configuration` no longer throws `'str' object has no attribute 'get'`. Layer ARN strings are now normalized to `{"Arn": ..., "CodeSize": 0}` dicts, matching the `create-function` path. Reported by @Vagator-Prostovich
+- **EC2 default VPC network ACL** — the default VPC's network ACL (`acl-00000001`) was referenced but never initialized, causing `DescribeNetworkAcls` to omit it. Now created at startup with standard allow/deny entries.
+- **S3 GetObject by VersionId** — requesting a specific version now returns the correct object data. Previously always returned the latest version, ignoring the `versionId` parameter.
+- **S3 delete markers in ListObjectVersions** — deleting an object in a versioned bucket now inserts a proper delete marker. `ListObjectVersions` returns `DeleteMarker` elements. Previously delete markers were missing entirely.
+- **S3 reset clears version history** — `/_ministack/reset` now clears `_object_versions` store. Previously versioned objects accumulated across resets.
+- **Lambda Invoke event payload** — handler event no longer contains an internal `_request_id` field. Previously leaked into the event dict, breaking handlers that validate input shape.
+- **Lambda PublishVersion ARN** — `FunctionArn` in the response now includes the version qualifier (e.g. `:1`). Previously returned the unqualified function ARN.
+- **DynamoDB BatchWriteItem on nonexistent table** — returns `ResourceNotFoundException` instead of silently placing items into `UnprocessedItems`.
+- **WAFv2 DeleteWebACL LockToken** — now enforces `LockToken` validation, returning `WAFOptimisticLockException` for stale tokens. `UpdateWebACL` already enforced this; `DeleteWebACL` was missing the check.
+- **Step Functions duplicate execution name** — `StartExecution` with a name already in use returns `ExecutionAlreadyExists`. Previously silently created a second execution.
+- **Step Functions Fail state error/cause** — `DescribeExecution` now includes `error` and `cause` fields when execution fails via a Fail state. Previously returned `null` for both.
+- **API Gateway v2 CreateApi Description** — `Description` field is now stored and returned. Previously silently dropped.
+- **API Gateway v1 CreateResource duplicate** — rejects duplicate `pathPart` under the same parent with `ConflictException`. Previously silently created duplicates.
+- **CloudWatch DeleteDashboards nonexistent** — returns `DashboardNotFoundError` for nonexistent dashboards. Previously silently succeeded.
+- **RDS DescribeDBInstances error code** — returns `DBInstanceNotFoundFault` (with `Fault` suffix) matching real AWS. Previously returned `DBInstanceNotFound`.
+- **SQS CreateQueue attribute mismatch** — creating a queue with the same name but different attributes returns `QueueNameExists`. Previously silently returned the existing queue URL.
+- **EC2 TagSpecifications on create operations** — `CreateVpc`, `CreateSubnet`, `CreateSecurityGroup`, `CreateKeyPair`, `CreateInternetGateway`, `CreateRouteTable`, `CreateNatGateway`, `CreateNetworkAcl` now process `TagSpecifications` and persist tags. Previously silently ignored.
+- **EC2 DeleteVpc dependency check** — returns `DependencyViolation` when subnets, non-default security groups, or internet gateways are still attached. Previously silently deleted the VPC.
+- **EC2 delete default security group blocked** — returns `CannotDelete` when attempting to delete a VPC's default security group. Previously silently deleted it.
+- **EC2 RunInstances MinCount > MaxCount** — returns `InvalidParameterCombination` when `MinCount` exceeds `MaxCount`. Previously silently launched instances.
+- **EC2 Describe tag sets** — `DescribeRouteTables`, `DescribeVolumes`, `DescribeSnapshots`, `DescribeNatGateways` now read tags from the `_tags` store. Previously returned hardcoded empty `<tagSet/>`.
+- **ECS DescribeTaskDefinition tags** — always returns tags in the response. Previously only returned tags when `include=["TAGS"]` was explicitly passed.
+
+---
+
 ## [1.2.6] — 2026-04-12
 
 ### Fixed
