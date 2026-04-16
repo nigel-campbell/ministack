@@ -991,6 +991,7 @@ def _lambda_esm_create(logical_id, props, stack_name):
         "FunctionResponseTypes": props.get("FunctionResponseTypes", []),
     }
     _lambda_svc._esms[esm_id] = esm
+    _lambda_svc._ensure_poller()
     return esm_id, {"UUID": esm_id}
 
 

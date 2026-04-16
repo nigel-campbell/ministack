@@ -114,6 +114,8 @@ def restore_state(data):
         _layers.update(data.get("layers", {}))
         _esms.update(data.get("esms", {}))
         _function_urls.update(data.get("function_urls", {}))
+        if _esms:
+            _ensure_poller()
 
 
 _restored = load_state("lambda")
