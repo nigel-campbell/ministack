@@ -7,7 +7,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.3.0] — 2026-04-18
+## [1.3.1] — 2026-04-18
 
 ### Added
 - **Hypercorn ASGI server with HTTP/2 h2c** — replaces uvicorn with hypercorn, enabling cleartext HTTP/2 (h2c) support. AWS Java SDK v2 and Kinesis Client Library (KCL) clients that require HTTP/2 now work out of the box. Idle RAM drops from ~21 MB to ~7 MB. Contributed by @AdigaAkhil (#369). Fixes #361, #364
