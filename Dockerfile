@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir --no-compile \
         "docker>=7.0.0" \
         "pyyaml>=6.0" \
         "cryptography>=41.0" \
+        "asyncssh>=2.14" \
         "pymysql>=1.1" \
         "boto3>=1.34" \
         "awscli"

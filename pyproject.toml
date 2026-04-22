@@ -32,6 +32,7 @@ full = [
     "duckdb>=0.10.0",
     "docker>=7.0.0",
     "cryptography>=41.0",
+    "asyncssh>=2.14",
     "psycopg2-binary>=2.9",
     "pymysql>=1.1",
 ]

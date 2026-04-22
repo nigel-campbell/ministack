@@ -1014,6 +1014,8 @@ async def _handle_lifespan(scope, receive, send):
                     if mod_name in _loaded_modules:
                         save_dict[key] = _loaded_modules[mod_name].get_state
                 save_all(save_dict)
+            if "transfer" in _loaded_modules:
+                await _loaded_modules["transfer"].stop_all_sftp_servers()
             _stop_docker_containers()
             await send({"type": "lifespan.shutdown.complete"})
             return

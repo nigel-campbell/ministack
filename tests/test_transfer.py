@@ -1,3 +1,6 @@
+import asyncio
+import os
+
 import pytest
 from botocore.exceptions import ClientError
 
@@ -315,3 +318,187 @@ def test_transfer_workos_sftp_workflow(transfer):
     with pytest.raises(ClientError) as exc:
         transfer.describe_user(ServerId=sid, UserName="sftp-org123")
     assert exc.value.response["Error"]["Code"] == "ResourceNotFoundException"
+
+
+# ========== SFTP connectivity ==========
+
+asyncssh = pytest.importorskip("asyncssh", reason="asyncssh not installed")
+
+SFTP_HOST = os.environ.get("MINISTACK_SFTP_HOST", "127.0.0.1")
+_BUCKET = "sftp-test-bucket"
+_ROLE = "arn:aws:iam::000000000000:role/transfer-role"
+
+
+def _sftp_port(server_id):
+    return int(server_id[-5:])
+
+
+@pytest.fixture
+def sftp_server(transfer, s3):
+    """Create an S3 bucket, Transfer server, and user with a generated key pair."""
+    s3.create_bucket(Bucket=_BUCKET)
+
+    key = asyncssh.generate_private_key("ssh-ed25519")
+    pub_key = key.export_public_key("openssh").decode().strip()
+
+    sid = transfer.create_server()["ServerId"]
+    transfer.create_user(
+        ServerId=sid,
+        UserName="test-user",
+        HomeDirectoryType="LOGICAL",
+        HomeDirectoryMappings=[{"Entry": "/", "Target": f"/{_BUCKET}/home"}],
+        Role=_ROLE,
+        SshPublicKeyBody=pub_key,
+    )
+    yield sid, key
+
+    # cleanup
+    try:
+        transfer.delete_user(ServerId=sid, UserName="test-user")
+    except Exception:
+        pass
+    try:
+        transfer.delete_server(ServerId=sid)
+    except Exception:
+        pass
+    try:
+        objs = s3.list_objects(Bucket=_BUCKET).get("Contents", [])
+        for obj in objs:
+            s3.delete_object(Bucket=_BUCKET, Key=obj["Key"])
+        s3.delete_bucket(Bucket=_BUCKET)
+    except Exception:
+        pass
+
+
+async def _connect(port, username, key):
+    return await asyncssh.connect(
+        SFTP_HOST,
+        port=port,
+        username=username,
+        client_keys=[key],
+        known_hosts=None,
+    )
+
+
+def test_sftp_connect_valid_key(sftp_server):
+    sid, key = sftp_server
+    port = _sftp_port(sid)
+    username = f"{sid}/test-user"
+
+    async def run():
+        conn = await _connect(port, username, key)
+        conn.close()
+        await conn.wait_closed()
+
+    asyncio.run(run())
+
+
+def test_sftp_connect_invalid_key(sftp_server):
+    sid, _ = sftp_server
+    port = _sftp_port(sid)
+    username = f"{sid}/test-user"
+    wrong_key = asyncssh.generate_private_key("ssh-ed25519")
+
+    async def run():
+        with pytest.raises(asyncssh.PermissionDenied):
+            await _connect(port, username, wrong_key)
+
+    asyncio.run(run())
+
+
+def test_sftp_upload_and_s3_read(sftp_server, s3):
+    sid, key = sftp_server
+    port = _sftp_port(sid)
+    username = f"{sid}/test-user"
+    content = b"hello from sftp"
+
+    async def run():
+        async with await _connect(port, username, key) as conn:
+            async with conn.start_sftp_client() as sftp:
+                async with sftp.open("/upload.txt", "wb") as f:
+                    await f.write(content)
+
+    asyncio.run(run())
+
+    body = s3.get_object(Bucket=_BUCKET, Key="home/upload.txt")["Body"].read()
+    assert body == content
+
+
+def test_sftp_download(sftp_server, s3):
+    sid, key = sftp_server
+    port = _sftp_port(sid)
+    username = f"{sid}/test-user"
+    content = b"pre-seeded content"
+
+    s3.put_object(Bucket=_BUCKET, Key="home/download.txt", Body=content)
+
+    async def run():
+        async with await _connect(port, username, key) as conn:
+            async with conn.start_sftp_client() as sftp:
+                async with sftp.open("/download.txt", "rb") as f:
+                    return await f.read()
+
+    result = asyncio.run(run())
+    assert result == content
+
+
+def test_sftp_listdir(sftp_server, s3):
+    sid, key = sftp_server
+    port = _sftp_port(sid)
+    username = f"{sid}/test-user"
+
+    s3.put_object(Bucket=_BUCKET, Key="home/alpha.txt", Body=b"a")
+    s3.put_object(Bucket=_BUCKET, Key="home/beta.txt", Body=b"b")
+
+    async def run():
+        async with await _connect(port, username, key) as conn:
+            async with conn.start_sftp_client() as sftp:
+                return await sftp.listdir("/")
+
+    names = asyncio.run(run())
+    assert "alpha.txt" in names
+    assert "beta.txt" in names
+
+
+def test_sftp_logical_path_mapping(transfer, s3):
+    """Entry '/' → Target '/bucket/prefix' — verify path translation end-to-end."""
+    asyncssh = pytest.importorskip("asyncssh")
+    bucket = "sftp-mapping-bucket"
+    s3.create_bucket(Bucket=bucket)
+
+    key = asyncssh.generate_private_key("ssh-ed25519")
+    pub_key = key.export_public_key("openssh").decode().strip()
+
+    sid = transfer.create_server()["ServerId"]
+    transfer.create_user(
+        ServerId=sid,
+        UserName="map-user",
+        HomeDirectoryType="LOGICAL",
+        HomeDirectoryMappings=[{"Entry": "/", "Target": f"/{bucket}/uploads"}],
+        Role=_ROLE,
+        SshPublicKeyBody=pub_key,
+    )
+
+    content = b"mapped content"
+    port = _sftp_port(sid)
+    username = f"{sid}/map-user"
+
+    async def run():
+        async with await asyncssh.connect(
+            SFTP_HOST, port=port, username=username,
+            client_keys=[key], known_hosts=None,
+        ) as conn:
+            async with conn.start_sftp_client() as sftp:
+                async with sftp.open("/data.bin", "wb") as f:
+                    await f.write(content)
+
+    asyncio.run(run())
+
+    body = s3.get_object(Bucket=bucket, Key="uploads/data.bin")["Body"].read()
+    assert body == content
+
+    # cleanup
+    s3.delete_object(Bucket=bucket, Key="uploads/data.bin")
+    s3.delete_bucket(Bucket=bucket)
+    transfer.delete_user(ServerId=sid, UserName="map-user")
+    transfer.delete_server(ServerId=sid)
